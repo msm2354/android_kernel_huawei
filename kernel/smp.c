@@ -15,7 +15,6 @@
 
 #include "smpboot.h"
 
-#ifdef CONFIG_USE_GENERIC_SMP_HELPERS
 enum {
 	CSD_FLAG_LOCK		= 0x01,
 };
@@ -33,7 +32,13 @@ struct call_single_queue {
 	raw_spinlock_t		lock;
 };
 
+/* CPU mask indicating which CPUs to bring online during smp_init() */
+static bool have_boot_cpu_mask;
+static cpumask_var_t boot_cpu_mask;
+
 static DEFINE_PER_CPU_SHARED_ALIGNED(struct call_single_queue, call_single_queue);
+
+static void flush_smp_call_function_queue(bool warn_cpu_offline);
 
 static int
 hotplug_cfd(struct notifier_block *nfb, unsigned long action, void *hcpu)
@@ -60,12 +65,27 @@ hotplug_cfd(struct notifier_block *nfb, unsigned long action, void *hcpu)
 #ifdef CONFIG_HOTPLUG_CPU
 	case CPU_UP_CANCELED:
 	case CPU_UP_CANCELED_FROZEN:
+		/* Fall-through to the CPU_DEAD[_FROZEN] case. */
 
 	case CPU_DEAD:
 	case CPU_DEAD_FROZEN:
 		free_cpumask_var(cfd->cpumask);
 		free_cpumask_var(cfd->cpumask_ipi);
 		free_percpu(cfd->csd);
+		break;
+
+	case CPU_DYING:
+	case CPU_DYING_FROZEN:
+		/*
+		 * The IPIs for the smp-call-function callbacks queued by other
+		 * CPUs might arrive late, either due to hardware latencies or
+		 * because this CPU disabled interrupts (inside stop-machine)
+		 * before the IPIs were sent. So flush out any pending callbacks
+		 * explicitly (without waiting for the IPIs to arrive), to
+		 * ensure that the outgoing CPU doesn't go offline with work
+		 * still pending.
+		 */
+		flush_smp_call_function_queue(false);
 		break;
 #endif
 	};
@@ -166,23 +186,49 @@ void generic_exec_single(int cpu, struct call_single_data *csd, int wait)
 		csd_lock_wait(csd);
 }
 
-/*
- * Invoked by arch to handle an IPI for call function single. Must be
- * called from the arch with interrupts disabled.
+/**
+ * generic_smp_call_function_single_interrupt - Execute SMP IPI callbacks
+ *
+ * Invoked by arch to handle an IPI for call function single.
+ * Must be called with interrupts disabled.
  */
 void generic_smp_call_function_single_interrupt(void)
 {
+	flush_smp_call_function_queue(true);
+}
+
+/**
+ * flush_smp_call_function_queue - Flush pending smp-call-function callbacks
+ *
+ * @warn_cpu_offline: If set to 'true', warn if callbacks were queued on an
+ *		      offline CPU. Skip this check if set to 'false'.
+ *
+ * Flush any pending smp-call-function callbacks queued on this CPU. This is
+ * invoked by the generic IPI handler, as well as by a CPU about to go offline,
+ * to ensure that all pending IPI callbacks are run before it goes completely
+ * offline.
+ *
+ * Loop through the call_single_queue and run all the queued callbacks.
+ * Must be called with interrupts disabled.
+ */
+static void flush_smp_call_function_queue(bool warn_cpu_offline)
+{
 	struct call_single_queue *q = &__get_cpu_var(call_single_queue);
 	LIST_HEAD(list);
+	static bool warned;
 
-	/*
-	 * Shouldn't receive this interrupt on a cpu that is not yet online.
-	 */
-	WARN_ON_ONCE(!cpu_online(smp_processor_id()));
+	WARN_ON(!irqs_disabled());
 
 	raw_spin_lock(&q->lock);
 	list_replace_init(&q->list, &list);
 	raw_spin_unlock(&q->lock);
+
+	/* There shouldn't be any pending callbacks on an offline CPU. */
+	if (unlikely(warn_cpu_offline && !cpu_online(smp_processor_id()) &&
+		     !warned && !list_empty(&q->list))) {
+		warned = true;
+		WARN(1, "IPI on offline CPU %d\n", smp_processor_id());
+	}
 
 	while (!list_empty(&list)) {
 		struct call_single_data *csd;
@@ -190,7 +236,6 @@ void generic_smp_call_function_single_interrupt(void)
 
 		csd = list_entry(list.next, struct call_single_data, list);
 		list_del(&csd->list);
-
 		/*
 		 * 'csd' can be invalid after this call if flags == 0
 		 * (when called through generic_exec_single()),
@@ -470,7 +515,6 @@ int smp_call_function(smp_call_func_t func, void *info, int wait)
 	return 0;
 }
 EXPORT_SYMBOL(smp_call_function);
-#endif /* USE_GENERIC_SMP_HELPERS */
 
 /* Setup configured maximum number of CPUs to activate */
 unsigned int setup_max_cpus = NR_CPUS;
@@ -525,6 +569,19 @@ static int __init maxcpus(char *str)
 
 early_param("maxcpus", maxcpus);
 
+static int __init boot_cpus(char *str)
+{
+	alloc_bootmem_cpumask_var(&boot_cpu_mask);
+	if (cpulist_parse(str, boot_cpu_mask) < 0) {
+		pr_warn("SMP: Incorrect boot_cpus cpumask\n");
+		return -EINVAL;
+	}
+	have_boot_cpu_mask = true;
+	return 0;
+}
+
+early_param("boot_cpus", boot_cpus);
+
 /* Setup number of possible processor ids */
 int nr_cpu_ids __read_mostly = NR_CPUS;
 EXPORT_SYMBOL(nr_cpu_ids);
@@ -533,6 +590,21 @@ EXPORT_SYMBOL(nr_cpu_ids);
 void __init setup_nr_cpu_ids(void)
 {
 	nr_cpu_ids = find_last_bit(cpumask_bits(cpu_possible_mask),NR_CPUS) + 1;
+}
+
+/* Should the given CPU be booted during smp_init() ? */
+static inline bool boot_cpu(int cpu)
+{
+	if (!have_boot_cpu_mask)
+		return true;
+
+	return cpumask_test_cpu(cpu, boot_cpu_mask);
+}
+
+static inline void free_boot_cpu_mask(void)
+{
+	if (have_boot_cpu_mask)	/* Allocated from boot_cpus() */
+		free_bootmem_cpumask_var(boot_cpu_mask);
 }
 
 /* Called by boot processor to activate the rest. */
@@ -546,9 +618,11 @@ void __init smp_init(void)
 	for_each_present_cpu(cpu) {
 		if (num_online_cpus() >= setup_max_cpus)
 			break;
-		if (!cpu_online(cpu))
+		if (!cpu_online(cpu) && boot_cpu(cpu))
 			cpu_up(cpu);
 	}
+
+	free_boot_cpu_mask();
 
 	/* Any cleanup work */
 	printk(KERN_INFO "Brought up %ld CPUs\n", (long)num_online_cpus());

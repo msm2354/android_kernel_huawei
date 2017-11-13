@@ -28,7 +28,7 @@
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
 #include "input-compat.h"
-
+#include <linux/log_jank.h>
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@suse.cz>");
 MODULE_DESCRIPTION("Input core");
 MODULE_LICENSE("GPL");
@@ -267,6 +267,8 @@ static int input_get_disposition(struct input_dev *dev,
 	case EV_SYN:
 		switch (code) {
 		case SYN_CONFIG:
+		case SYN_TIME_SEC:
+		case SYN_TIME_NSEC:
 			disposition = INPUT_PASS_TO_ALL;
 			break;
 
@@ -430,6 +432,25 @@ void input_event(struct input_dev *dev,
 		spin_lock_irqsave(&dev->event_lock, flags);
 		input_handle_event(dev, type, code, value);
 		spin_unlock_irqrestore(&dev->event_lock, flags);
+#ifdef CONFIG_LOG_JANK
+		if(EV_MSC == type)
+		{
+			if((code == MSC_SCAN)&&(!value))
+			{
+				pr_jank(JL_COVER_WAKE_LOCK,"%s#T:%5lu","JL_COVER_WAKE_LOCK",getrealtime());
+			}
+		}
+		else if(EV_ABS == type)
+		{
+			if(code == ABS_DISTANCE)
+			{
+				if(value)
+					pr_jank(JL_PROXIMITY_SENSOR_FAR, "%s#T:%5lu", "JL_PROXIMITY_SENSOR_FAR",getrealtime());
+				else
+					pr_jank(JL_PROXIMITY_SENSOR_NEAR, "%s#T:%5lu", "JL_PROXIMITY_SENSOR_NEAR",getrealtime());
+			}
+		}
+#endif
 	}
 }
 EXPORT_SYMBOL(input_event);
@@ -1664,9 +1685,11 @@ void input_reset_device(struct input_dev *dev)
 		 * Keys that have been pressed at suspend time are unlikely
 		 * to be still pressed when we resume.
 		 */
-		spin_lock_irq(&dev->event_lock);
-		input_dev_release_keys(dev);
-		spin_unlock_irq(&dev->event_lock);
+		if (!test_bit(INPUT_PROP_NO_DUMMY_RELEASE, dev->propbit)) {
+			spin_lock_irq(&dev->event_lock);
+			input_dev_release_keys(dev);
+			spin_unlock_irq(&dev->event_lock);
+		}
 	}
 
 	mutex_unlock(&dev->mutex);
@@ -1930,18 +1953,22 @@ static unsigned int input_estimate_events_per_packet(struct input_dev *dev)
 
 	events = mt_slots + 1; /* count SYN_MT_REPORT and SYN_REPORT */
 
-	for (i = 0; i < ABS_CNT; i++) {
-		if (test_bit(i, dev->absbit)) {
-			if (input_is_mt_axis(i))
-				events += mt_slots;
-			else
-				events++;
+	if (test_bit(EV_ABS, dev->evbit)) {
+		for (i = 0; i < ABS_CNT; i++) {
+			if (test_bit(i, dev->absbit)) {
+				if (input_is_mt_axis(i))
+					events += mt_slots;
+				else
+					events++;
+			}
 		}
 	}
 
-	for (i = 0; i < REL_CNT; i++)
-		if (test_bit(i, dev->relbit))
-			events++;
+	if (test_bit(EV_REL, dev->evbit)) {
+		for (i = 0; i < REL_CNT; i++)
+			if (test_bit(i, dev->relbit))
+				events++;
+	}
 
 	/* Make room for KEY and MSC events */
 	events += 7;

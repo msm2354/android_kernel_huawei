@@ -14,10 +14,13 @@
  * r10 points at the start of the private FP workspace in the thread structure
  * sp points to a struct pt_regs (as defined in include/asm/proc/ptrace.h)
  */
+#include <linux/init.h>
+#include <linux/linkage.h>
 #include <asm/thread_info.h>
 #include <asm/vfpmacros.h>
 #include <linux/kern_levels.h>
-#include "../kernel/entry-header.S"
+#include <asm/assembler.h>
+#include <asm/asm-offsets.h>
 
 	.macro	DBGSTR, str
 #ifdef DEBUG
@@ -193,6 +196,22 @@ look_for_VFP_exceptions:
 	VFPFMRX	r5, FPSCR
 	tst	r5, #FPSCR_IXE
 	bne	process_exception
+
+#ifdef CONFIG_ARCH_MSM_KRAIT
+	@ Krait does not set FPEXC.DEX for unsupported short vector instructions
+	mrc     p15, 0, r2, c0, c0, 0
+	ldr     r4, =0xff00fc00
+	and     r4, r2, r4
+	ldr     r2, =0x51000400
+	cmp     r2, r4
+	bne skip
+
+	tst	r5, #FPSCR_LENGTH_MASK
+	beq	skip
+	orr	r1, r1, #FPEXC_DEX
+	b process_exception
+skip:
+#endif
 
 	@ Fall into hand on to next handler - appropriate coproc instr
 	@ not recognised by VFP

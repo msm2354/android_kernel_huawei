@@ -80,22 +80,36 @@ static inline void flush_tlb_all(void)
 
 static inline void flush_tlb_mm(struct mm_struct *mm)
 {
+#ifdef CONFIG_ARCH_MSM8994_V1_TLBI_WA
+	dsb();
+	asm("tlbi	vmalle1is");
+	dsb();
+	isb();
+#else
 	unsigned long asid = (unsigned long)ASID(mm) << 48;
 
 	dsb();
 	asm("tlbi	aside1is, %0" : : "r" (asid));
 	dsb();
+#endif
 }
 
 static inline void flush_tlb_page(struct vm_area_struct *vma,
 				  unsigned long uaddr)
 {
+#ifdef CONFIG_ARCH_MSM8994_V1_TLBI_WA
+	dsb();
+	asm("tlbi	vmalle1is");
+	dsb();
+	isb();
+#else
 	unsigned long addr = uaddr >> 12 |
 		((unsigned long)ASID(vma->vm_mm) << 48);
 
 	dsb();
 	asm("tlbi	vae1is, %0" : : "r" (addr));
 	dsb();
+#endif
 }
 
 /*
@@ -116,6 +130,8 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
 	 */
 	dsb();
 }
+
+#define update_mmu_cache_pmd(vma, address, pmd) do { } while (0)
 
 #endif
 

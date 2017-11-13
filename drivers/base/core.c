@@ -826,9 +826,8 @@ static struct kobject *get_device_parent(struct device *dev,
 		return &parent->kobj;
 	return NULL;
 }
-
 static inline bool live_in_glue_dir(struct kobject *kobj,
-				    struct device *dev)
+					struct device *dev)
 {
 	if (!kobj || !dev->class ||
 	    kobj->kset != &dev->class->p->glue_dirs)
@@ -838,14 +837,15 @@ static inline bool live_in_glue_dir(struct kobject *kobj,
 
 static inline struct kobject *get_glue_dir(struct device *dev)
 {
-	return dev->kobj.parent;
+	if (live_in_glue_dir(&dev->kobj, dev))
+		return dev->kobj.parent;
+	return NULL;
 }
-
 /*
- * make sure cleaning up dir as the last step, we need to make
- * sure .release handler of kobject is run with holding the
- * global lock
- */
+* make sure cleaning up dir as the last step, we need to make
+* sure .release handler of kobject is run with holding the
+* global lock
+*/
 static void cleanup_glue_dir(struct device *dev, struct kobject *glue_dir)
 {
 	/* see if we live in a "glue" directory */
@@ -1019,8 +1019,8 @@ int device_add(struct device *dev)
 	struct device *parent = NULL;
 	struct kobject *kobj;
 	struct class_interface *class_intf;
-	int error = -EINVAL;
 	struct kobject *glue_dir = NULL;
+	int error = -EINVAL;
 
 	dev = get_device(dev);
 	if (!dev)
@@ -1102,7 +1102,13 @@ int device_add(struct device *dev)
 	error = dpm_sysfs_add(dev);
 	if (error)
 		goto DPMError;
-	device_pm_add(dev);
+	if ((dev->pm_domain) || (dev->type && dev->type->pm)
+		|| (dev->class && (dev->class->pm || dev->class->resume))
+		|| (dev->bus && (dev->bus->pm || dev->bus->resume)) ||
+		(dev->driver && dev->driver->pm)) {
+		device_pm_add(dev);
+	}
+
 
 	/* Notify clients of device addition.  This call must come
 	 * after dpm_sysfs_add() and before kobject_uevent().
@@ -1155,7 +1161,8 @@ done:
 	kobject_del(&dev->kobj);
  Error:
 	cleanup_glue_dir(dev, glue_dir);
-	put_device(parent);
+	if (parent)
+		put_device(parent);
 name_error:
 	kfree(dev->p);
 	dev->p = NULL;

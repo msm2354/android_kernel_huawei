@@ -336,6 +336,10 @@ static int get_v4l2_plane32(struct v4l2_plane *up, struct v4l2_plane32 *up32,
 
 	if (copy_in_user(up, up32, 2 * sizeof(__u32)) ||
 		copy_in_user(&up->data_offset, &up32->data_offset,
+				sizeof(__u32)) ||
+		copy_in_user(up->reserved, up32->reserved,
+				sizeof(up->reserved)) ||
+		copy_in_user(&up->length, &up32->length,
 				sizeof(__u32)))
 		return -EFAULT;
 
@@ -361,6 +365,8 @@ static int put_v4l2_plane32(struct v4l2_plane *up, struct v4l2_plane32 *up32,
 				enum v4l2_memory memory)
 {
 	if (copy_in_user(up32, up, 2 * sizeof(__u32)) ||
+		copy_in_user(up32->reserved, up->reserved,
+				sizeof(up32->reserved)) ||
 		copy_in_user(&up32->data_offset, &up->data_offset,
 				sizeof(__u32)))
 		return -EFAULT;
@@ -714,6 +720,9 @@ static int put_v4l2_ext_controls32(struct v4l2_ext_controls *kp, struct v4l2_ext
 struct v4l2_event32 {
 	__u32				type;
 	union {
+		struct v4l2_event_vsync		vsync;
+		struct v4l2_event_ctrl		ctrl;
+		struct v4l2_event_frame_sync	frame_sync;
 		compat_s64		value64;
 		__u8			data[64];
 	} u;

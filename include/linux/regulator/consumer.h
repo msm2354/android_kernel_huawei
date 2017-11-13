@@ -35,6 +35,9 @@
 #ifndef __LINUX_REGULATOR_CONSUMER_H_
 #define __LINUX_REGULATOR_CONSUMER_H_
 
+#include <linux/types.h>
+#include <linux/compiler.h>
+
 struct device;
 struct notifier_block;
 
@@ -115,6 +118,10 @@ struct regulator;
  *            using the bulk regulator APIs.
  * @consumer: The regulator consumer for the supply.  This will be managed
  *            by the bulk API.
+ * @min_uV:   The minimum requested voltage for the regulator (in microvolts),
+ *            or 0 to not set a voltage.
+ * @max_uV:   The maximum requested voltage for the regulator (in microvolts),
+ *            or 0 to use @min_uV.
  *
  * The regulator APIs provide a series of regulator_bulk_() API calls as
  * a convenience to consumers which require multiple supplies.  This
@@ -123,6 +130,8 @@ struct regulator;
 struct regulator_bulk_data {
 	const char *supply;
 	struct regulator *consumer;
+	int min_uV;
+	int max_uV;
 
 	/* private: Internal use */
 	int ret;
@@ -139,6 +148,9 @@ struct regulator *__must_check regulator_get_exclusive(struct device *dev,
 						       const char *id);
 void regulator_put(struct regulator *regulator);
 void devm_regulator_put(struct regulator *regulator);
+#ifdef  CONFIG_HUAWEI_KERNEL
+void regulator_debug_print_enabled(void);
+#endif
 
 /* regulator output control and status */
 int __must_check regulator_enable(struct regulator *regulator);
@@ -153,6 +165,8 @@ int __must_check devm_regulator_bulk_get(struct device *dev, int num_consumers,
 					 struct regulator_bulk_data *consumers);
 int __must_check regulator_bulk_enable(int num_consumers,
 				       struct regulator_bulk_data *consumers);
+int regulator_bulk_set_voltage(int num_consumers,
+			  struct regulator_bulk_data *consumers);
 int regulator_bulk_disable(int num_consumers,
 			   struct regulator_bulk_data *consumers);
 int regulator_bulk_force_disable(int num_consumers,

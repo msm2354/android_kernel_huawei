@@ -74,9 +74,9 @@ static unsigned long mmap_rnd(void)
 	 * 28 bits of randomness in 64bit mmaps, 40 address space bits
 	 */
 	if (mmap_is_ia32())
-		rnd = (unsigned long)get_random_int() % (1<<8);
+		rnd = (unsigned long)get_random_long() % (1UL<<8);
 	else
-		rnd = (unsigned long)get_random_int() % (1<<28);
+		rnd = (unsigned long)get_random_long() % (1UL<<28);
 
 	return rnd << PAGE_SHIFT;
 }
@@ -109,10 +109,8 @@ void arch_pick_mmap_layout(struct mm_struct *mm)
 	if (mmap_is_legacy()) {
 		mm->mmap_base = mm->mmap_legacy_base;
 		mm->get_unmapped_area = arch_get_unmapped_area;
-		mm->unmap_area = arch_unmap_area;
 	} else {
 		mm->mmap_base = mmap_base(random_factor);
 		mm->get_unmapped_area = arch_get_unmapped_area_topdown;
-		mm->unmap_area = arch_unmap_area_topdown;
 	}
 }

@@ -3,6 +3,7 @@
  *
  * Copyright (C) 2005 John Lenz <lenz@cs.wisc.edu>
  * Copyright (C) 2005-2007 Richard Purdie <rpurdie@openedhand.com>
+ * Copyright (C) 2016 @surdu_petru
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -21,6 +22,8 @@
 #include <linux/leds.h>
 #include "leds.h"
 
+#define LED_BUFF_SIZE 50
+
 static struct class *leds_class;
 
 static void led_update_brightness(struct led_classdev *led_cdev)
@@ -37,7 +40,7 @@ static ssize_t led_brightness_show(struct device *dev,
 	/* no lock needed for this */
 	led_update_brightness(led_cdev);
 
-	return sprintf(buf, "%u\n", led_cdev->brightness);
+	return snprintf(buf, LED_BUFF_SIZE, "%u\n", led_cdev->brightness);
 }
 
 static ssize_t led_brightness_store(struct device *dev,
@@ -51,11 +54,28 @@ static ssize_t led_brightness_store(struct device *dev,
 	if (ret)
 		return ret;
 
-	if (state == LED_OFF)
-		led_trigger_remove(led_cdev);
 	__led_set_brightness(led_cdev, state);
 
 	return size;
+}
+
+static ssize_t led_max_brightness_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	ssize_t ret = -EINVAL;
+	unsigned long state = 0;
+
+	ret = strict_strtoul(buf, 10, &state);
+	if (!ret) {
+		ret = size;
+		if (state > LED_FULL)
+			state = LED_FULL;
+		led_cdev->max_brightness = state;
+		led_set_brightness(led_cdev, led_cdev->brightness);
+	}
+
+	return ret;
 }
 
 static ssize_t led_max_brightness_show(struct device *dev,
@@ -63,15 +83,37 @@ static ssize_t led_max_brightness_show(struct device *dev,
 {
 	struct led_classdev *led_cdev = dev_get_drvdata(dev);
 
-	return sprintf(buf, "%u\n", led_cdev->max_brightness);
+	return snprintf(buf, LED_BUFF_SIZE, "%u\n", led_cdev->max_brightness);
+}
+
+static ssize_t led_blink_store(struct device *dev,
+	struct device_attribute *attr,
+	const char *buf, size_t size)
+{
+	struct led_classdev *led_cdev = dev_get_drvdata(dev);
+	unsigned long on, off = 1000;
+
+	if (kstrtoul(buf, 10, &on))
+		return -EINVAL;
+
+	if (!on) {
+		led_stop_software_blink(led_cdev);
+	} else {
+		on = 1000;
+		led_blink_set(led_cdev, &on, &off);
+	}
+
+	return size;
 }
 
 static struct device_attribute led_class_attrs[] = {
 	__ATTR(brightness, 0644, led_brightness_show, led_brightness_store),
-	__ATTR(max_brightness, 0444, led_max_brightness_show, NULL),
+	__ATTR(max_brightness, 0644, led_max_brightness_show,
+			led_max_brightness_store),
 #ifdef CONFIG_LEDS_TRIGGERS
 	__ATTR(trigger, 0644, led_trigger_show, led_trigger_store),
 #endif
+	__ATTR(blink, 0644, NULL, led_blink_store),
 	__ATTR_NULL,
 };
 

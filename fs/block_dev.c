@@ -30,6 +30,12 @@
 #include <linux/aio.h>
 #include <asm/uaccess.h>
 #include "internal.h"
+/* DTS20141205XXXXX qidechun/yantongguang 2014-12-05 begin */ 
+#ifdef CONFIG_DUMP_SYS_INFO
+#include <linux/module.h>
+#include <linux/srecorder.h>
+#endif
+/* DTS20141205XXXXX qidechun/yantongguang 2014-12-05 end */ 
 
 struct bdev_inode {
 	struct block_device bdev;
@@ -303,6 +309,12 @@ static int blkdev_readpage(struct file * file, struct page * page)
 	return block_read_full_page(page, blkdev_get_block);
 }
 
+static int blkdev_readpages(struct file *file, struct address_space *mapping,
+			struct list_head *pages, unsigned nr_pages)
+{
+	return mpage_readpages(mapping, pages, nr_pages, blkdev_get_block);
+}
+
 static int blkdev_write_begin(struct file *file, struct address_space *mapping,
 			loff_t pos, unsigned len, unsigned flags,
 			struct page **pagep, void **fsdata)
@@ -513,6 +525,22 @@ static int bdev_set(struct inode *inode, void *data)
 }
 
 static LIST_HEAD(all_bdevs);
+
+/* DTS20141205XXXXX qidechun/yantongguang 2014-12-05 begin */ 
+#ifdef CONFIG_DUMP_SYS_INFO
+unsigned long get_all_bdevs(void)
+{
+    return (unsigned long)&all_bdevs;
+}
+EXPORT_SYMBOL(get_all_bdevs);
+
+unsigned long get_bdev_lock(void)
+{
+    return (unsigned long)&bdev_lock;
+}
+EXPORT_SYMBOL(get_bdev_lock);
+#endif
+/* DTS20141205XXXXX qidechun/yantongguang 2014-12-05 end */ 
 
 struct block_device *bdget(dev_t dev)
 {
@@ -1584,12 +1612,14 @@ static int blkdev_releasepage(struct page *page, gfp_t wait)
 
 static const struct address_space_operations def_blk_aops = {
 	.readpage	= blkdev_readpage,
+	.readpages	= blkdev_readpages,
 	.writepage	= blkdev_writepage,
 	.write_begin	= blkdev_write_begin,
 	.write_end	= blkdev_write_end,
 	.writepages	= generic_writepages,
 	.releasepage	= blkdev_releasepage,
 	.direct_IO	= blkdev_direct_IO,
+	.is_dirty_writeback = buffer_check_dirty_writeback,
 };
 
 const struct file_operations def_blk_fops = {
