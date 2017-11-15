@@ -28,7 +28,7 @@
 
 /* wakeup system 60 seconds before real clock time for huawei solution */
 #ifdef CONFIG_HUAWEI_KERNEL
-#define ALARM_DELTA 300
+#define ALARM_DELTA 60
 #else
 #define ALARM_DELTA 120
 #endif
