@@ -101,7 +101,7 @@
 		qcom,pvs-version-fuse-sel = <0 55 2 0>;
 		qcom,cpr-speed-bin-max-corners =
 					<0 0 3 5 8>,
-					<0 1 3 5 7>,
+					<0 1 3 5 7>;
 		qcom,cpr-quot-adjust-scaling-factor-max = <650>;
 		qcom,cpr-enable;
 	};
