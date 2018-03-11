@@ -39,6 +39,10 @@
 #include "synaptics_i2c_rmi4.h"
 #include <linux/input/mt.h>
 
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+#include <linux/input/doubletap2wake.h>
+#endif
+
 #define DRIVER_NAME "synaptics_rmi4_i2c"
 #define INPUT_PHYS_NAME "synaptics_rmi4_i2c/input0"
 #define DEBUGFS_DIR_NAME "ts_debug"
@@ -4425,6 +4429,15 @@ static struct i2c_driver synaptics_rmi4_driver = {
 	.id_table = synaptics_rmi4_id_table,
 };
 
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+	bool prevent_sleep = (dt2w_switch > 0);
+			if (prevent_sleep) {
+				pr_debug("suspend avoided!\n");
+				synaptics_dsx_enable_wakeup_source(rmi4_data, true);
+				return 0;
+			} else {
+#endif
+				
  /**
  * synaptics_rmi4_init()
  *
@@ -4451,6 +4464,10 @@ static void __exit synaptics_rmi4_exit(void)
 {
 	i2c_del_driver(&synaptics_rmi4_driver);
 }
+				
+#ifdef CONFIG_TOUCHSCREEN_DOUBLETAP2WAKE
+	}
+#endif
 
 module_init(synaptics_rmi4_init);
 module_exit(synaptics_rmi4_exit);
