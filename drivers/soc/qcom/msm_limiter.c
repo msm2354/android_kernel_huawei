@@ -311,6 +311,13 @@ static ssize_t show_resume_max_freq_##cpu		\
 {							\
 	return sprintf(buf, "%u\n",			\
 			limit.resume_max_freq[cpu]);	\
+}	
+static ssize_t show_resume_max_freq_##cpu		\
+(struct kobject *kobj,					\
+ struct kobj_attribute *attr, char *buf)		\
+{							\
+	return sprintf(buf, "%u\n",			\
+			limit.resume_max_freq[cpu]);	\
 }							\
 static ssize_t store_suspend_min_freq_##cpu(		\
  struct kobject *kobj,					\
